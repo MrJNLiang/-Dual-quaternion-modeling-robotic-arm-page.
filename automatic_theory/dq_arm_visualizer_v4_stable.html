@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>对偶四元数 3-DOF 机械臂交互演示（v4-稳定版）</title>
+
+  <!-- Three.js (non-module) + OrbitControls -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+  <style>
+    :root{
+      --muted:#94a3b8; --text:#e5e7eb;
+      --border:rgba(148,163,184,.18);
+    }
+    *{ box-sizing:border-box; }
+    body{
+      margin:0; background:linear-gradient(180deg,#070a10,#0b1220);
+      color:var(--text);
+      font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,"PingFang SC","Microsoft YaHei",Arial;
+      height:100vh; overflow:hidden;
+    }
+    .app{ display:grid; grid-template-columns: 360px 1fr; height:100vh; }
+    .panel{
+      background:linear-gradient(180deg,rgba(17,24,38,.92),rgba(10,15,23,.92));
+      border-right:1px solid var(--border);
+      padding:16px 14px 18px;
+      overflow:auto;
+    }
+    h1{ margin:4px 0 10px; font-size:18px; letter-spacing:.2px; }
+    .sub{ color:var(--muted); font-size:12px; line-height:1.5; margin-bottom:12px; }
+    .card{
+      border:1px solid var(--border);
+      background:rgba(15,23,42,.45);
+      border-radius:12px;
+      padding:12px;
+      margin:10px 0;
+      box-shadow: 0 10px 30px rgba(0,0,0,.18);
+    }
+    .card h2{ font-size:13px; margin:0 0 8px; color:#dbeafe; letter-spacing:.2px; }
+    .row{ display:grid; grid-template-columns: 92px 1fr 64px; gap:10px; align-items:center; margin:8px 0; }
+    label{ font-size:12px; color:var(--muted); }
+    input[type="range"]{ width:100%; }
+    input[type="number"]{
+      width:64px; padding:6px 6px;
+      border-radius:10px;
+      border:1px solid var(--border);
+      background:rgba(2,6,23,.55);
+      color:var(--text);
+      outline:none;
+    }
+    .togrow{ display:flex; align-items:center; gap:10px; margin-top:6px; color:var(--muted); font-size:12px; }
+    .btnrow{ display:flex; gap:10px; flex-wrap:wrap; margin-top:8px; }
+    button{
+      background:rgba(96,165,250,.18);
+      border:1px solid rgba(96,165,250,.38);
+      color:var(--text);
+      padding:9px 10px;
+      border-radius:12px;
+      cursor:pointer;
+      font-size:12px;
+    }
+    button:hover{ filter:brightness(1.08); }
+    button.secondary{ background:rgba(52,211,153,.14); border-color:rgba(52,211,153,.38); }
+    button.danger{ background:rgba(251,113,133,.12); border-color:rgba(251,113,133,.35); }
+    .kv{ display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:6px; }
+    .mono{
+      font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;
+      font-size:12px; line-height:1.4; color:#e2e8f0;
+      white-space:pre-wrap; word-break:break-word;
+      background:rgba(2,6,23,.55);
+      border:1px solid var(--border);
+      border-radius:12px;
+      padding:10px;
+    }
+    .hint{ color:var(--muted); font-size:12px; margin-top:8px; line-height:1.45; }
+    .tag{
+      display:inline-block; padding:2px 8px; border-radius:999px;
+      background:rgba(96,165,250,.14); border:1px solid rgba(96,165,250,.28);
+      color:#bfdbfe; font-size:11px; margin-right:6px;
+    }
+    #view{ position:relative; height:100%; }
+    #canvas{ width:100%; height:100%; display:block; }
+    .overlay{
+      position:absolute; left:12px; top:12px;
+      background:rgba(2,6,23,.55); border:1px solid var(--border);
+      border-radius:12px; padding:10px 12px; max-width:620px;
+      font-size:12px; color:var(--muted);
+      box-shadow: 0 10px 30px rgba(0,0,0,.20);
+    }
+    .overlay b{ color:#e5e7eb; }
+    .small{ font-size:11px; opacity:.95; }
+  </style>
+</head>
+
+<body>
+  <div class="app">
+    <div class="panel">
+      <h1>对偶四元数 3-DOF 机械臂交互演示（v4-稳定版）</h1>
+      <div class="sub">
+        目标：用<strong>对偶四元数</strong>链式乘法做 3 个转动关节的正运动学，并在 3D 中可视化。<br>
+        位姿对偶四元数常用写法：<span class="tag">x = r + (ε/2)·p·r</span>（r：旋转四元数，p：平移纯四元数）。
+      </div>
+
+      <div class="card">
+        <h2>关节变量（单位：度）</h2>
+        <div class="row">
+          <label>θ1 (绕 z)</label>
+          <input id="th1" type="range" min="-180" max="180" step="1" value="30" />
+          <input id="th1n" type="number" min="-180" max="180" step="1" value="30" />
+        </div>
+        <div class="row">
+          <label>θ2 (绕 y)</label>
+          <input id="th2" type="range" min="-150" max="150" step="1" value="45" />
+          <input id="th2n" type="number" min="-150" max="150" step="1" value="45" />
+        </div>
+        <div class="row">
+          <label>θ3 (绕 y)</label>
+          <input id="th3" type="range" min="-150" max="150" step="1" value="-30" />
+          <input id="th3n" type="number" min="-150" max="150" step="1" value="-30" />
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>连杆长度（单位：m）</h2>
+        <div class="row">
+          <label>L1</label>
+          <input id="L1" type="range" min="0.2" max="1.2" step="0.01" value="0.60" />
+          <input id="L1n" type="number" min="0.2" max="1.2" step="0.01" value="0.60" />
+        </div>
+        <div class="row">
+          <label>L2</label>
+          <input id="L2" type="range" min="0.2" max="1.2" step="0.01" value="0.55" />
+          <input id="L2n" type="number" min="0.2" max="1.2" step="0.01" value="0.55" />
+        </div>
+        <div class="row">
+          <label>L3</label>
+          <input id="L3" type="range" min="0.15" max="1.0" step="0.01" value="0.40" />
+          <input id="L3n" type="number" min="0.15" max="1.0" step="0.01" value="0.40" />
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>误差项（可调）</h2>
+        <div class="togrow">
+          <input id="errOn" type="checkbox" />
+          <span>启用误差：把误差直接叠加到角度 / 连杆长度上</span>
+        </div>
+
+        <div class="row">
+          <label>δθ1 (deg)</label>
+          <input id="e1" type="range" min="-15" max="15" step="0.1" value="0" />
+          <input id="e1n" type="number" min="-15" max="15" step="0.1" value="0" />
+        </div>
+        <div class="row">
+          <label>δθ2 (deg)</label>
+          <input id="e2" type="range" min="-15" max="15" step="0.1" value="0" />
+          <input id="e2n" type="number" min="-15" max="15" step="0.1" value="0" />
+        </div>
+        <div class="row">
+          <label>δθ3 (deg)</label>
+          <input id="e3" type="range" min="-15" max="15" step="0.1" value="0" />
+          <input id="e3n" type="number" min="-15" max="15" step="0.1" value="0" />
+        </div>
+
+        <div class="row">
+          <label>δL1 (m)</label>
+          <input id="dL1" type="range" min="-0.15" max="0.15" step="0.005" value="0" />
+          <input id="dL1n" type="number" min="-0.15" max="0.15" step="0.005" value="0" />
+        </div>
+        <div class="row">
+          <label>δL2 (m)</label>
+          <input id="dL2" type="range" min="-0.15" max="0.15" step="0.005" value="0" />
+          <input id="dL2n" type="number" min="-0.15" max="0.15" step="0.005" value="0" />
+        </div>
+        <div class="row">
+          <label>δL3 (m)</label>
+          <input id="dL3" type="range" min="-0.15" max="0.15" step="0.005" value="0" />
+          <input id="dL3n" type="number" min="-0.15" max="0.15" step="0.005" value="0" />
+        </div>
+
+        <div class="btnrow">
+          <button id="reset" class="danger">重置参数</button>
+          <button id="toggleAnim" class="secondary">播放/暂停</button>
+        </div>
+
+        <div class="hint">
+          <span class="tag">t = 2·(q_d · q_r*)</span> 从对偶四元数取平移（取向量部）。
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>串联对偶四元数运算（实时）</h2>
+        <div class="sub" style="margin:0 0 8px;">
+          串联正运动学：<span class="tag">x = x1 · x2 · x3</span>，其中 <span class="tag">xi = ri + ε di</span>。<br/>
+          采用：<span class="tag">x1 = Rz(θ1)Tx(L1)</span>，
+          <span class="tag">x2 = Ry(θ2)Tx(L2)</span>，
+          <span class="tag">x3 = Ry(θ3)Tx(L3)</span>。
+        </div>
+        <div id="chainOut" class="mono"></div>
+      </div>
+
+      <div class="card">
+        <h2>下一步拓展：名义模型 vs 含误差模型</h2>
+        <div class="togrow">
+          <input id="compareOn" type="checkbox" checked />
+          <span>同屏对比两套机械臂（名义/含误差）。名义模型：不加 δθ、δL。</span>
+        </div>
+        <div class="togrow">
+          <input id="traceOn" type="checkbox" />
+          <span>显示末端轨迹（播放时更明显）</span>
+        </div>
+        <div class="btnrow">
+          <button id="clearTrace" class="secondary">清除轨迹</button>
+        </div>
+
+        <div class="sub" style="margin-top:10px;">
+          位姿误差对偶四元数：
+          <span class="tag">xΔ = x_nom^{-1} · x_real</span>，则 <span class="tag">x_real = x_nom · xΔ</span>。
+        </div>
+        <div id="deltaOut" class="mono"></div>
+
+        <div class="sub" style="margin-top:10px;">末端位置误差：Δt = t_real − t_nom</div>
+        <div id="errOut" class="mono"></div>
+      </div>
+
+      <div class="card">
+        <h2>末端位姿（由对偶四元数计算）</h2>
+        <div class="kv">
+          <div>
+            <div class="sub" style="margin:0 0 6px;">位置 (m)</div>
+            <div id="posOut" class="mono"></div>
+          </div>
+          <div>
+            <div class="sub" style="margin:0 0 6px;">旋转四元数 r = (w,x,y,z)</div>
+            <div id="quatOut" class="mono"></div>
+          </div>
+        </div>
+        <div class="sub" style="margin-top:10px;">末端对偶四元数 x = r + ε d</div>
+        <div id="dqOut" class="mono"></div>
+      </div>
+
+      <div class="hint small">
+        若 CDN 被拦截：用本地服务器打开（例如：<span class="tag">python -m http.server</span>）。
+      </div>
+    </div>
+
+    <div id="view">
+      <canvas id="canvas"></canvas>
+      <div class="overlay">
+        <div><b>操作</b>：鼠标左键旋转 / 滚轮缩放 / 右键平移。</div>
+        <div class="small" style="margin-top:6px;">
+          关节轴：θ1 绕 z（底座），θ2、θ3 绕 y（肘式摆动）。
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Runtime error overlay -->
+  <script>
+    (function(){
+      function showErr(msg){
+        const box = document.createElement('div');
+        box.style.position='fixed';
+        box.style.left='12px';
+        box.style.right='12px';
+        box.style.bottom='12px';
+        box.style.zIndex='99999';
+        box.style.padding='10px 12px';
+        box.style.borderRadius='12px';
+        box.style.background='rgba(2,6,23,.78)';
+        box.style.border='1px solid rgba(251,113,133,.45)';
+        box.style.color='#fecdd3';
+        box.style.fontSize='12px';
+        box.style.whiteSpace='pre-wrap';
+        box.textContent = msg;
+        document.body.appendChild(box);
+      }
+      window.addEventListener('error', (e)=>{
+        showErr("页面脚本运行出错（实时）：\n" + (e.message || e.error || 'unknown') + "\n\n建议：打开开发者工具(Console)查看具体报错行。");
+      });
+      setTimeout(()=>{
+        if(!window.THREE){
+          showErr("Three.js 未加载成功（CDN 被拦截/离线）。\n可用 python -m http.server 打开，或改成离线版引用。");
+          return;
+        }
+        if(!THREE.OrbitControls){
+          showErr("OrbitControls 未加载成功（THREE.OrbitControls 不存在）。\n建议用本地服务器打开或换网络。");
+        }
+      }, 0);
+    })();
+  </script>
+
+<script>
+/* =========================
+   Quaternion (w,x,y,z)
+   ========================= */
+function qMul(a,b){
+  const [aw,ax,ay,az]=a, [bw,bx,by,bz]=b;
+  return [
+    aw*bw - ax*bx - ay*by - az*bz,
+    aw*bx + ax*bw + ay*bz - az*by,
+    aw*by - ax*bz + ay*bw + az*bx,
+    aw*bz + ax*by - ay*bx + az*bw
+  ];
+}
+function qConj(q){ return [q[0], -q[1], -q[2], -q[3]]; }
+function qNorm(q){ return Math.hypot(q[0],q[1],q[2],q[3]); }
+function qNormalize(q){
+  const n=qNorm(q); if(n<1e-12) return [1,0,0,0];
+  return q.map(v=>v/n);
+}
+function qFromAxisAngle(axis, theta){
+  const [x,y,z]=axis;
+  const half=theta/2;
+  const s=Math.sin(half);
+  return qNormalize([Math.cos(half), x*s, y*s, z*s]);
+}
+
+/* =========================
+   Dual Quaternion dq = qr + ε qd
+   ========================= */
+function dqNormalize(dq){
+  const n=qNorm(dq.qr);
+  if(n<1e-12) return {qr:[1,0,0,0], qd:[0,0,0,0]};
+  return { qr: dq.qr.map(v=>v/n), qd: dq.qd.map(v=>v/n) };
+}
+function dqMul(A,B){
+  const qr = qMul(A.qr, B.qr);
+  const qd = qMul(A.qr, B.qd).map((v,i)=>v + qMul(A.qd, B.qr)[i]);
+  return dqNormalize({qr, qd});
+}
+function dqFromRotation(qr){ return {qr:qNormalize(qr), qd:[0,0,0,0]}; }
+function dqFromTranslation(t){ return {qr:[1,0,0,0], qd:[0, t[0]/2, t[1]/2, t[2]/2]}; }
+function dqToTranslation(dq){
+  const tQuat = qMul(dq.qd, qConj(dq.qr)).map(v=>v*2.0);
+  return [tQuat[1], tQuat[2], tQuat[3]];
+}
+function dqInverse(dq){
+  const qr_inv = qConj(dq.qr);
+  const tmp = qMul(qMul(qr_inv, dq.qd), qr_inv);
+  return { qr: qr_inv, qd: tmp.map(v=>-v) };
+}
+function fmt(v, digits=4){ return (Math.abs(v)<1e-10 ? 0 : v).toFixed(digits); }
+function fmtVec3(v){ return `[ ${fmt(v[0])}, ${fmt(v[1])}, ${fmt(v[2])} ]`; }
+function dqToString(dq, digits=4){
+  const r=dq.qr, d=dq.qd;
+  const f=(x)=>fmt(x, digits);
+  return `r = [ ${f(r[0])}, ${f(r[1])}, ${f(r[2])}, ${f(r[3])} ]\n` +
+         `d = [ ${f(d[0])}, ${f(d[1])}, ${f(d[2])}, ${f(d[3])} ]\n` +
+         `x = r + ε d`;
+}
+function quatToAxisAngle(q){
+  const w = Math.max(-1, Math.min(1, q[0]));
+  const theta = 2*Math.acos(w);
+  const s = Math.sqrt(Math.max(0, 1-w*w));
+  if(s < 1e-8) return {axis:[1,0,0], theta:0};
+  return {axis:[q[1]/s, q[2]/s, q[3]/s], theta:theta};
+}
+
+/* =========================
+   FK (Dual Quaternion chain)
+   x1 = Rz(θ1)Tx(L1)
+   x2 = Ry(θ2)Tx(L2)
+   x3 = Ry(θ3)Tx(L3)
+   ========================= */
+function FK(params){
+  const deg=Math.PI/180;
+
+  const th1 = (params.th1 + params.e1) * deg;
+  const th2 = (params.th2 + params.e2) * deg;
+  const th3 = (params.th3 + params.e3) * deg;
+
+  const clamp = (x)=>Math.max(0.02, x);
+  const L1 = clamp(params.L1 + params.dL1);
+  const L2 = clamp(params.L2 + params.dL2);
+  const L3 = clamp(params.L3 + params.dL3);
+
+  const R1 = dqFromRotation(qFromAxisAngle([0,0,1], th1));
+  const R2 = dqFromRotation(qFromAxisAngle([0,1,0], th2));
+  const R3 = dqFromRotation(qFromAxisAngle([0,1,0], th3));
+
+  const Tx1 = dqFromTranslation([L1,0,0]);
+  const Tx2 = dqFromTranslation([L2,0,0]);
+  const Tx3 = dqFromTranslation([L3,0,0]);
+
+  const Tx1h = dqFromTranslation([L1/2,0,0]);
+  const Tx2h = dqFromTranslation([L2/2,0,0]);
+  const Tx3h = dqFromTranslation([L3/2,0,0]);
+
+  const I = {qr:[1,0,0,0], qd:[0,0,0,0]};
+
+  const X1 = dqMul(R1, Tx1);
+  const X2 = dqMul(R2, Tx2);
+  const X3 = dqMul(R3, Tx3);
+  const X12 = dqMul(X1, X2);
+  const X123 = dqMul(X12, X3);
+
+  // for drawing
+  const T_link1 = dqMul(R1, Tx1h);
+  const T_j2 = X1;
+  const T_link2 = dqMul(dqMul(T_j2, R2), Tx2h);
+  const T_j3 = dqMul(dqMul(T_j2, R2), Tx2);
+  const T_link3 = dqMul(dqMul(T_j3, R3), Tx3h);
+
+  return {
+    L:[L1,L2,L3],
+    X1,X2,X3,X12,X123,
+    T_j1:I, T_j2, T_j3,
+    T_link1, T_link2, T_link3,
+    T_ee:X123
+  };
+}
+
+/* =========================
+   Three.js Scene
+   ========================= */
+const canvas = document.getElementById("canvas");
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(canvas.clientWidth || 2, canvas.clientHeight || 2, false);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x070a10);
+
+const camera = new THREE.PerspectiveCamera(45, 2, 0.01, 100);
+camera.position.set(2.2, 1.3, 2.2);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(0.7, 0.25, 0.0);
+controls.update();
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+const dir = new THREE.DirectionalLight(0xffffff, 0.95);
+dir.position.set(2,3,1);
+scene.add(dir);
+
+const grid = new THREE.GridHelper(6, 24, 0x334155, 0x1f2937);
+grid.position.y = -0.001;
+scene.add(grid);
+scene.add(new THREE.AxesHelper(0.6));
+
+const linkGeom = new THREE.BoxGeometry(1, 0.08, 0.08);
+const jointGeom = new THREE.SphereGeometry(0.06, 18, 18);
+const eeGeom = new THREE.SphereGeometry(0.065, 18, 18);
+
+const matLink = new THREE.MeshStandardMaterial({color:0x60a5fa, metalness:0.1, roughness:0.45});
+const matJoint = new THREE.MeshStandardMaterial({color:0x34d399, metalness:0.1, roughness:0.40});
+const matEE = new THREE.MeshStandardMaterial({color:0xfb7185, metalness:0.1, roughness:0.35});
+
+const link1 = new THREE.Mesh(linkGeom, matLink);
+const link2 = new THREE.Mesh(linkGeom, matLink);
+const link3 = new THREE.Mesh(linkGeom, matLink);
+const j1 = new THREE.Mesh(jointGeom, matJoint);
+const j2 = new THREE.Mesh(jointGeom, matJoint);
+const j3 = new THREE.Mesh(jointGeom, matJoint);
+const ee = new THREE.Mesh(eeGeom, matEE);
+scene.add(link1,link2,link3,j1,j2,j3,ee);
+
+const matNomLink = new THREE.MeshStandardMaterial({wireframe:true});
+const matNomJoint = new THREE.MeshStandardMaterial({wireframe:true});
+const matNomEE = new THREE.MeshStandardMaterial({wireframe:true});
+
+const link1N = new THREE.Mesh(linkGeom, matNomLink);
+const link2N = new THREE.Mesh(linkGeom, matNomLink);
+const link3N = new THREE.Mesh(linkGeom, matNomLink);
+const j1N = new THREE.Mesh(jointGeom, matNomJoint);
+const j2N = new THREE.Mesh(jointGeom, matNomJoint);
+const j3N = new THREE.Mesh(jointGeom, matNomJoint);
+const eeN = new THREE.Mesh(eeGeom, matNomEE);
+scene.add(link1N,link2N,link3N,j1N,j2N,j3N,eeN);
+
+const errLineGeom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+const errLineMat = new THREE.LineBasicMaterial();
+const errLine = new THREE.Line(errLineGeom, errLineMat);
+scene.add(errLine);
+
+// trace
+const traceMax = 500;
+let traceRealPts = [];
+let traceNomPts = [];
+const traceRealGeom = new THREE.BufferGeometry();
+const traceNomGeom = new THREE.BufferGeometry();
+const traceRealLine = new THREE.Line(traceRealGeom, new THREE.LineBasicMaterial());
+const traceNomLine = new THREE.Line(traceNomGeom, new THREE.LineBasicMaterial());
+scene.add(traceRealLine, traceNomLine);
+function resetTraces(){
+  traceRealPts = [];
+  traceNomPts = [];
+  traceRealGeom.setFromPoints(traceRealPts);
+  traceNomGeom.setFromPoints(traceNomPts);
+}
+
+function applyPose(obj, dq){
+  const t = dqToTranslation(dq);
+  obj.position.set(t[0], t[1], t[2]);
+  const r = dq.qr; // (w,x,y,z)
+  obj.quaternion.set(r[1], r[2], r[3], r[0]); // three: (x,y,z,w)
+}
+
+/* =========================
+   UI wiring
+   ========================= */
+function bindPair(rangeId, numberId, onChange){
+  const r=document.getElementById(rangeId);
+  const n=document.getElementById(numberId);
+  const syncFromRange=()=>{ n.value=r.value; onChange(); };
+  const syncFromNumber=()=>{ r.value=n.value; onChange(); };
+  r.addEventListener("input", syncFromRange);
+  n.addEventListener("input", syncFromNumber);
+  return ()=>parseFloat(r.value);
+}
+
+let update; // declared now, assigned later
+
+const get = {
+  th1: bindPair("th1","th1n", ()=>update()),
+  th2: bindPair("th2","th2n", ()=>update()),
+  th3: bindPair("th3","th3n", ()=>update()),
+  L1:  bindPair("L1","L1n", ()=>update()),
+  L2:  bindPair("L2","L2n", ()=>update()),
+  L3:  bindPair("L3","L3n", ()=>update()),
+  e1:  bindPair("e1","e1n", ()=>update()),
+  e2:  bindPair("e2","e2n", ()=>update()),
+  e3:  bindPair("e3","e3n", ()=>update()),
+  dL1: bindPair("dL1","dL1n", ()=>update()),
+  dL2: bindPair("dL2","dL2n", ()=>update()),
+  dL3: bindPair("dL3","dL3n", ()=>update())
+};
+
+const errOn = document.getElementById("errOn");
+errOn.addEventListener("change", ()=>update());
+
+const posOut = document.getElementById("posOut");
+const quatOut = document.getElementById("quatOut");
+const dqOut = document.getElementById("dqOut");
+const chainOut = document.getElementById("chainOut");
+const deltaOut = document.getElementById("deltaOut");
+const errOut = document.getElementById("errOut");
+
+const compareOn = document.getElementById("compareOn");
+compareOn.addEventListener("change", ()=>update());
+
+const traceOn = document.getElementById("traceOn");
+traceOn.addEventListener("change", ()=>{
+  if(!traceOn.checked){
+    traceRealLine.visible = false;
+    traceNomLine.visible = false;
+  }else{
+    traceRealLine.visible = true;
+    traceNomLine.visible = true;
+  }
+});
+
+document.getElementById("clearTrace").addEventListener("click", ()=>resetTraces());
+
+let animOn = false;
+document.getElementById("toggleAnim").addEventListener("click", ()=>{ animOn = !animOn; });
+
+document.getElementById("reset").addEventListener("click", ()=>{
+  const setVal=(id,v)=>{ document.getElementById(id).value=v; };
+  setVal("th1",30); setVal("th1n",30);
+  setVal("th2",45); setVal("th2n",45);
+  setVal("th3",-30); setVal("th3n",-30);
+  setVal("L1",0.60); setVal("L1n",0.60);
+  setVal("L2",0.55); setVal("L2n",0.55);
+  setVal("L3",0.40); setVal("L3n",0.40);
+  errOn.checked=false;
+  ["e1","e1n","e2","e2n","e3","e3n","dL1","dL1n","dL2","dL2n","dL3","dL3n"].forEach(id=>setVal(id,0));
+  animOn=false;
+  resetTraces();
+  update();
+});
+
+function currentParams(){
+  const useErr = errOn.checked;
+  return {
+    th1:get.th1(), th2:get.th2(), th3:get.th3(),
+    L1:get.L1(), L2:get.L2(), L3:get.L3(),
+    e1: useErr?get.e1():0, e2: useErr?get.e2():0, e3: useErr?get.e3():0,
+    dL1:useErr?get.dL1():0, dL2:useErr?get.dL2():0, dL3:useErr?get.dL3():0
+  };
+}
+function nominalParams(){
+  // ✅ 名义模型：不加误差（这是你报错的那个函数，v4 确保全局可见）
+  return {
+    th1:get.th1(), th2:get.th2(), th3:get.th3(),
+    L1:get.L1(), L2:get.L2(), L3:get.L3(),
+    e1:0, e2:0, e3:0,
+    dL1:0, dL2:0, dL3:0
+  };
+}
+
+/* =========================
+   Update loop
+   ========================= */
+update = function(){
+  const fkReal = FK(currentParams());
+
+  const doCompare = !!compareOn.checked;
+  const fkNom = doCompare ? FK(nominalParams()) : null;
+
+  // apply real
+  link1.scale.set(fkReal.L[0], 1, 1);
+  link2.scale.set(fkReal.L[1], 1, 1);
+  link3.scale.set(fkReal.L[2], 1, 1);
+
+  applyPose(j1, fkReal.T_j1);
+  applyPose(j2, fkReal.T_j2);
+  applyPose(j3, fkReal.T_j3);
+  applyPose(link1, fkReal.T_link1);
+  applyPose(link2, fkReal.T_link2);
+  applyPose(link3, fkReal.T_link3);
+  applyPose(ee, fkReal.T_ee);
+
+  // outputs (real)
+  const tR = dqToTranslation(fkReal.T_ee);
+  posOut.textContent = fmtVec3(tR);
+  quatOut.textContent = `[ ${fmt(fkReal.T_ee.qr[0])}, ${fmt(fkReal.T_ee.qr[1])}, ${fmt(fkReal.T_ee.qr[2])}, ${fmt(fkReal.T_ee.qr[3])} ]`;
+  dqOut.textContent = dqToString(fkReal.T_ee);
+
+  // chain display
+  chainOut.textContent =
+    `x1 = Rz(θ1)Tx(L1)\n${dqToString(fkReal.X1)}\n\n` +
+    `x2 = Ry(θ2)Tx(L2)\n${dqToString(fkReal.X2)}\n\n` +
+    `x3 = Ry(θ3)Tx(L3)\n${dqToString(fkReal.X3)}\n\n` +
+    `x12 = x1 · x2\n${dqToString(fkReal.X12)}\n\n` +
+    `x = x12 · x3  (末端)\n${dqToString(fkReal.X123)}`;
+
+  // compare
+  [link1N,link2N,link3N,j1N,j2N,j3N,eeN,errLine].forEach(o=>o.visible = doCompare);
+  if(!doCompare){
+    deltaOut.textContent = "（关闭同屏对比后，这里不计算 xΔ）";
+    errOut.textContent = "（关闭同屏对比后，这里不显示 Δt）";
+    traceRealLine.visible = false;
+    traceNomLine.visible = false;
+    return;
+  }
+
+  // apply nominal
+  link1N.scale.set(fkNom.L[0], 1, 1);
+  link2N.scale.set(fkNom.L[1], 1, 1);
+  link3N.scale.set(fkNom.L[2], 1, 1);
+
+  applyPose(j1N, fkNom.T_j1);
+  applyPose(j2N, fkNom.T_j2);
+  applyPose(j3N, fkNom.T_j3);
+  applyPose(link1N, fkNom.T_link1);
+  applyPose(link2N, fkNom.T_link2);
+  applyPose(link3N, fkNom.T_link3);
+  applyPose(eeN, fkNom.T_ee);
+
+  const tN = dqToTranslation(fkNom.T_ee);
+  errLine.geometry.setFromPoints([
+    new THREE.Vector3(tN[0],tN[1],tN[2]),
+    new THREE.Vector3(tR[0],tR[1],tR[2])
+  ]);
+
+  // xΔ and Δt
+  const xDelta = dqMul(dqInverse(fkNom.T_ee), fkReal.T_ee);
+  const tErr = [tR[0]-tN[0], tR[1]-tN[1], tR[2]-tN[2]];
+
+  const qErr = qNormalize(qMul(qConj(fkNom.T_ee.qr), fkReal.T_ee.qr));
+  const aa = quatToAxisAngle(qErr);
+  const deg = aa.theta * 180/Math.PI;
+
+  deltaOut.textContent =
+    `xΔ = x_nom^{-1} · x_real\n${dqToString(xDelta)}\n\n` +
+    `q_err = conj(r_nom) · r_real\n` +
+    `axis = [ ${fmt(aa.axis[0])}, ${fmt(aa.axis[1])}, ${fmt(aa.axis[2])} ]\n` +
+    `angle = ${fmt(deg,3)} deg`;
+
+  errOut.textContent = `Δt = [ ${fmt(tErr[0])}, ${fmt(tErr[1])}, ${fmt(tErr[2])} ] (m)`;
+
+  // traces
+  const showTrace = !!traceOn.checked;
+  traceRealLine.visible = showTrace;
+  traceNomLine.visible = showTrace;
+
+  if(showTrace){
+    const vR = new THREE.Vector3(tR[0],tR[1],tR[2]);
+    const vN = new THREE.Vector3(tN[0],tN[1],tN[2]);
+
+    const pushIfMoved = (arr, v)=>{
+      if(arr.length===0){ arr.push(v); return; }
+      const last = arr[arr.length-1];
+      if(last.distanceTo(v) > 0.002){ arr.push(v); }
+    };
+    pushIfMoved(traceRealPts, vR);
+    pushIfMoved(traceNomPts, vN);
+
+    if(traceRealPts.length > traceMax) traceRealPts.shift();
+    if(traceNomPts.length > traceMax) traceNomPts.shift();
+
+    traceRealGeom.setFromPoints(traceRealPts);
+    traceNomGeom.setFromPoints(traceNomPts);
+  }
+};
+
+function resizeIfNeeded(){
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  const dpr = renderer.getPixelRatio();
+  const need = (canvas.width !== Math.floor(w*dpr)) || (canvas.height !== Math.floor(h*dpr));
+  if(need){
+    renderer.setSize(w, h, false);
+    camera.aspect = w/h;
+    camera.updateProjectionMatrix();
+  }
+}
+
+let t0 = performance.now();
+function animate(now){
+  resizeIfNeeded();
+
+  if(animOn){
+    const p = currentParams();
+    const dt = (now - t0)/1000;
+    const amp = 12;
+    const th2 = (p.th2 + amp*Math.sin(dt*0.9));
+    const th3 = (p.th3 + amp*Math.sin(dt*1.1 + 0.7));
+    document.getElementById("th2").value = th2.toFixed(0);
+    document.getElementById("th2n").value = document.getElementById("th2").value;
+    document.getElementById("th3").value = th3.toFixed(0);
+    document.getElementById("th3n").value = document.getElementById("th3").value;
+    update();
+  }
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+
+// init
+traceRealLine.visible = false;
+traceNomLine.visible = false;
+resetTraces();
+update();
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>

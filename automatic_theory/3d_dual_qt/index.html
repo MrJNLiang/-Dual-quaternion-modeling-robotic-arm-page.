@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>对偶四元数机械臂教学实验室</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['\\(', '\\)']],
+        displayMath: [['\\[', '\\]']]
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+      }
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+</head>
+<body>
+  <div id="app">
+    <aside id="panel">
+      <header class="hero">
+        <div>
+          <div class="eyebrow">对偶四元数教学实验室</div>
+          <h1>qt 形式 4-DOF 机械臂</h1>
+          <p class="lead">公式 &rarr; UI &rarr; 3D。每个变量可编辑并映射到场景。</p>
+        </div>
+        <div class="badge">3R + 1P</div>
+      </header>
+
+      <section class="card">
+        <h2>核心公式</h2>
+        <div class="formula">\(\hat x = q + \varepsilon q_t\)</div>
+        <div class="formula">\(t = 2 q_t q^*\)</div>
+        <div class="formula">\(q(\theta,s)=\cos(\theta/2)+\sin(\theta/2)\,s\)</div>
+        <div class="formula">\(s \equiv \cos(\pi/2)+\sin(\pi/2)\,s\)</div>
+        <p class="muted">所有轴向向量自动归一化，纯四元数用统一的三角一致式显示。</p>
+      </section>
+
+      <section class="card">
+        <h2>连杆几何</h2>
+        <div class="grid-2">
+          <label>连杆 1 长度</label>
+          <div class="field">
+            <input type="range" id="l1" min="0.2" max="1.2" step="0.01" value="0.6" />
+            <input type="number" id="l1-num" min="0.2" max="1.2" step="0.01" value="0.6" />
+          </div>
+          <label>连杆 2 长度</label>
+          <div class="field">
+            <input type="range" id="l2" min="0.2" max="1.2" step="0.01" value="0.5" />
+            <input type="number" id="l2-num" min="0.2" max="1.2" step="0.01" value="0.5" />
+          </div>
+          <label>连杆 3 长度</label>
+          <div class="field">
+            <input type="range" id="l3" min="0.2" max="1.2" step="0.01" value="0.4" />
+            <input type="number" id="l3-num" min="0.2" max="1.2" step="0.01" value="0.4" />
+          </div>
+        </div>
+        <div class="toggles">
+          <label><input type="checkbox" id="show-axes" checked /> 显示关节轴</label>
+          <label><input type="checkbox" id="show-traj" checked /> 显示轨迹</label>
+          <label><input type="checkbox" id="show-traj-error" checked /> 显示误差轨迹</label>
+        </div>
+      </section>
+
+      <section class="card" id="joint-1">
+        <h2>关节 1 (R)</h2>
+        <div class="grid-2">
+          <label>\(\theta_1\) (度)</label>
+          <div class="field">
+            <input type="range" id="j1-angle" min="-180" max="180" step="1" value="30" />
+            <input type="number" id="j1-angle-num" min="-180" max="180" step="1" value="30" />
+          </div>
+          <label>轴向</label>
+          <div class="field">
+            <select id="j1-axis-mode">
+              <option value="z" selected>z</option>
+              <option value="y">y</option>
+              <option value="x">x</option>
+              <option value="custom">自定义</option>
+            </select>
+            <div class="vector">
+              <input id="j1-axis-x" type="number" step="0.01" value="0" />
+              <input id="j1-axis-y" type="number" step="0.01" value="0" />
+              <input id="j1-axis-z" type="number" step="0.01" value="1" />
+            </div>
+          </div>
+        </div>
+        <div class="formula">\(q_1(\theta_1,s_1)=\cos(\theta_1/2)+\sin(\theta_1/2)\,s_1\)</div>
+        <div class="value">轴向（单位）: <span id="j1-axis-unit"></span></div>
+        <div class="value">纯四元数: <span id="j1-axis-pure"></span></div>
+        <div class="value">\(q_1\): <span id="j1-q"></span></div>
+        <div class="value">\(q_{t,1}\): <span id="j1-qt"></span></div>
+      </section>
+
+      <section class="card" id="joint-2">
+        <h2>关节 2 (R)</h2>
+        <div class="grid-2">
+          <label>\(\theta_2\) (度)</label>
+          <div class="field">
+            <input type="range" id="j2-angle" min="-180" max="180" step="1" value="-20" />
+            <input type="number" id="j2-angle-num" min="-180" max="180" step="1" value="-20" />
+          </div>
+          <label>轴向</label>
+          <div class="field">
+            <select id="j2-axis-mode">
+              <option value="y" selected>y</option>
+              <option value="z">z</option>
+              <option value="x">x</option>
+              <option value="custom">自定义</option>
+            </select>
+            <div class="vector">
+              <input id="j2-axis-x" type="number" step="0.01" value="0" />
+              <input id="j2-axis-y" type="number" step="0.01" value="1" />
+              <input id="j2-axis-z" type="number" step="0.01" value="0" />
+            </div>
+          </div>
+        </div>
+        <div class="formula">\(q_2(\theta_2,s_2)=\cos(\theta_2/2)+\sin(\theta_2/2)\,s_2\)</div>
+        <div class="value">轴向（单位）: <span id="j2-axis-unit"></span></div>
+        <div class="value">纯四元数: <span id="j2-axis-pure"></span></div>
+        <div class="value">\(q_2\): <span id="j2-q"></span></div>
+        <div class="value">\(q_{t,2}\): <span id="j2-qt"></span></div>
+      </section>
+
+      <section class="card" id="joint-3">
+        <h2>关节 3 (R)</h2>
+        <div class="grid-2">
+          <label>\(\theta_3\) (度)</label>
+          <div class="field">
+            <input type="range" id="j3-angle" min="-180" max="180" step="1" value="40" />
+            <input type="number" id="j3-angle-num" min="-180" max="180" step="1" value="40" />
+          </div>
+          <label>轴向</label>
+          <div class="field">
+            <select id="j3-axis-mode">
+              <option value="y" selected>y</option>
+              <option value="z">z</option>
+              <option value="x">x</option>
+              <option value="custom">自定义</option>
+            </select>
+            <div class="vector">
+              <input id="j3-axis-x" type="number" step="0.01" value="0" />
+              <input id="j3-axis-y" type="number" step="0.01" value="1" />
+              <input id="j3-axis-z" type="number" step="0.01" value="0" />
+            </div>
+          </div>
+        </div>
+        <div class="formula">\(q_3(\theta_3,s_3)=\cos(\theta_3/2)+\sin(\theta_3/2)\,s_3\)</div>
+        <div class="value">轴向（单位）: <span id="j3-axis-unit"></span></div>
+        <div class="value">纯四元数: <span id="j3-axis-pure"></span></div>
+        <div class="value">\(q_3\): <span id="j3-q"></span></div>
+        <div class="value">\(q_{t,3}\): <span id="j3-qt"></span></div>
+      </section>
+
+      <section class="card" id="joint-4">
+        <h2>关节 4 (P)</h2>
+        <div class="grid-2">
+          <label>\(d_4\) (m)</label>
+          <div class="field">
+            <input type="range" id="j4-d" min="-0.4" max="0.6" step="0.01" value="0.2" />
+            <input type="number" id="j4-d-num" min="-0.4" max="0.6" step="0.01" value="0.2" />
+          </div>
+          <label>轴向</label>
+          <div class="field">
+            <select id="j4-axis-mode">
+              <option value="x" selected>x</option>
+              <option value="y">y</option>
+              <option value="z">z</option>
+              <option value="custom">自定义</option>
+            </select>
+            <div class="vector">
+              <input id="j4-axis-x" type="number" step="0.01" value="1" />
+              <input id="j4-axis-y" type="number" step="0.01" value="0" />
+              <input id="j4-axis-z" type="number" step="0.01" value="0" />
+            </div>
+          </div>
+        </div>
+        <div class="formula">\(q_4 = 1, \quad \hat x_4 = 1 + \varepsilon(\tau_4/2),\; \tau_4=d_4 \hat t_4\)</div>
+        <div class="value">轴向（单位）: <span id="j4-axis-unit"></span></div>
+        <div class="value">纯四元数: <span id="j4-axis-pure"></span></div>
+        <div class="value">\(q_4\): <span id="j4-q"></span></div>
+        <div class="value">\(q_{t,4}\): <span id="j4-qt"></span></div>
+      </section>
+
+      <section class="card">
+        <h2>串联乘法链</h2>
+        <div class="formula">\(\hat x_N = \hat x_1\hat x_2\hat x_3\hat x_4\)</div>
+        <div class="formula">\((q_a+\varepsilon q_{t,a})(q_b+\varepsilon q_{t,b}) = (q_a q_b)+\varepsilon(q_a q_{t,b}+q_{t,a}q_b)\)</div>
+        <div class="dq-grid">
+          <div class="dq-item">
+            <div class="dq-title">x1</div>
+            <div class="dq-line">q: <span id="x1-q"></span></div>
+            <div class="dq-line">qt: <span id="x1-qt"></span></div>
+          </div>
+          <div class="dq-item">
+            <div class="dq-title">x2</div>
+            <div class="dq-line">q: <span id="x2-q"></span></div>
+            <div class="dq-line">qt: <span id="x2-qt"></span></div>
+          </div>
+          <div class="dq-item">
+            <div class="dq-title">x3</div>
+            <div class="dq-line">q: <span id="x3-q"></span></div>
+            <div class="dq-line">qt: <span id="x3-qt"></span></div>
+          </div>
+          <div class="dq-item">
+            <div class="dq-title">x4</div>
+            <div class="dq-line">q: <span id="x4-q"></span></div>
+            <div class="dq-line">qt: <span id="x4-qt"></span></div>
+          </div>
+          <div class="dq-item">
+            <div class="dq-title">x12</div>
+            <div class="dq-line">q: <span id="x12-q"></span></div>
+            <div class="dq-line">qt: <span id="x12-qt"></span></div>
+          </div>
+          <div class="dq-item">
+            <div class="dq-title">x123</div>
+            <div class="dq-line">q: <span id="x123-q"></span></div>
+            <div class="dq-line">qt: <span id="x123-qt"></span></div>
+          </div>
+          <div class="dq-item">
+            <div class="dq-title">xN</div>
+            <div class="dq-line">q: <span id="xN-q"></span></div>
+            <div class="dq-line">qt: <span id="xN-qt"></span></div>
+          </div>
+        </div>
+        <div class="value">\(t_N = 2 q_{t,N} q_N^*\): <span id="xN-t"></span></div>
+      </section>
+
+      <section class="card">
+        <h2>乘性误差模型</h2>
+        <div class="formula">\(\hat x_{real}(q) = \hat x_N(q)\,\hat c\)</div>
+        <div class="formula">\(\hat x_\Delta=\hat x_N^{-1}\hat x_{real}\)</div>
+        <div class="grid-2">
+          <label>\(q_c\) (w,x,y,z)</label>
+          <div class="field">
+            <input id="c-qw" type="number" step="0.001" value="1" />
+            <input id="c-qx" type="number" step="0.001" value="0" />
+            <input id="c-qy" type="number" step="0.001" value="0" />
+            <input id="c-qz" type="number" step="0.001" value="0" />
+          </div>
+          <label>\(q_{t,c}\) (w,x,y,z)</label>
+          <div class="field">
+            <input id="c-qtw" type="number" step="0.001" value="0" />
+            <input id="c-qtx" type="number" step="0.001" value="0" />
+            <input id="c-qty" type="number" step="0.001" value="0" />
+            <input id="c-qtz" type="number" step="0.001" value="0" />
+          </div>
+        </div>
+        <div class="actions">
+          <button id="normalize-error">归一化 \(q_c\)</button>
+        </div>
+        <div class="value">\(\hat x_{real}\): <span id="x-real"></span></div>
+        <div class="value">\(\hat x_\Delta\): <span id="x-delta"></span></div>
+      </section>
+
+      <section class="card">
+        <h2>目标位姿与轨迹</h2>
+        <div class="tabs">
+          <label><input type="radio" name="target-mode" id="target-mode-pose" value="pose" checked /> 平移 + 轴角</label>
+          <label><input type="radio" name="target-mode" id="target-mode-dq" value="dq" /> 直接输入 qt</label>
+        </div>
+        <div id="target-pose">
+          <div class="grid-2">
+            <label>\(p_d\) (x,y,z)</label>
+            <div class="field">
+              <input id="target-px" type="number" step="0.01" value="0.7" />
+              <input id="target-py" type="number" step="0.01" value="0.2" />
+              <input id="target-pz" type="number" step="0.01" value="0.3" />
+            </div>
+            <label>轴向</label>
+            <div class="field">
+              <input id="target-axis-x" type="number" step="0.01" value="0" />
+              <input id="target-axis-y" type="number" step="0.01" value="0" />
+              <input id="target-axis-z" type="number" step="0.01" value="1" />
+            </div>
+            <label>\(\theta_d\) (度)</label>
+            <div class="field">
+              <input id="target-angle" type="number" step="1" value="45" />
+            </div>
+          </div>
+        </div>
+        <div id="target-dq" class="hidden">
+          <div class="grid-2">
+            <label>\(q_d\) (w,x,y,z)</label>
+            <div class="field">
+              <input id="target-qw" type="number" step="0.001" value="1" />
+              <input id="target-qx" type="number" step="0.001" value="0" />
+              <input id="target-qy" type="number" step="0.001" value="0" />
+              <input id="target-qz" type="number" step="0.001" value="0" />
+            </div>
+            <label>\(q_{t,d}\) (w,x,y,z)</label>
+            <div class="field">
+              <input id="target-qtw" type="number" step="0.001" value="0" />
+              <input id="target-qtx" type="number" step="0.001" value="0.35" />
+              <input id="target-qty" type="number" step="0.001" value="0.1" />
+              <input id="target-qtz" type="number" step="0.001" value="0.15" />
+            </div>
+          </div>
+        </div>
+        <div class="actions">
+          <button id="target-from-current">使用当前位姿作为目标</button>
+        </div>
+        <div class="grid-2">
+          <label>插值方式</label>
+          <div class="field">
+            <select id="traj-method">
+              <option value="slerp">Slerp（旋转）+ 线性（平移）</option>
+              <option value="dqlerp" selected>ScLERP（DQLERP 近似）</option>
+            </select>
+          </div>
+          <label>采样点数</label>
+          <div class="field">
+            <input id="traj-count" type="number" min="10" max="200" step="5" value="60" />
+          </div>
+        </div>
+        <div class="value">\(\hat x_d\): <span id="x-d"></span></div>
+        <div class="value">\(t_d = 2 q_{t,d} q_d^*\): <span id="x-d-t"></span></div>
+      </section>
+
+      <section class="card">
+        <h2>Jacobian（几何列）</h2>
+        <div class="formula">关节轴通过共轭推进到空间：\(s^\uparrow = q_{prev} s q_{prev}^*\)</div>
+        <div class="formula">\(J = [\;\xi_1\;\xi_2\;\xi_3\;\xi_4\;],\;\xi_i = \begin{bmatrix}\omega_i \\ v_i\end{bmatrix}\)</div>
+        <div class="jacobian">
+          <div class="jac-col">\(\xi_1\): <span id="jac-1"></span></div>
+          <div class="jac-col">\(\xi_2\): <span id="jac-2"></span></div>
+          <div class="jac-col">\(\xi_3\): <span id="jac-3"></span></div>
+          <div class="jac-col">\(\xi_4\): <span id="jac-4"></span></div>
+        </div>
+        <div class="actions">
+          <button id="jac-verify">有限差分验证</button>
+        </div>
+        <div class="value">验证: <span id="jac-verify-result">未运行</span></div>
+      </section>
+
+      <section class="card">
+        <h2>H∞ 模块（公式展示）</h2>
+        <div class="formula">名义运动学: \(\dot{\hat x}_N = \frac{1}{2}\,\hat x_N\,\hat\xi\)</div>
+        <div class="formula">含误差: \(\hat x_{real} = \hat x_N \hat c\)</div>
+        <div class="formula">跟踪误差: \(\tilde{\hat x} = \hat x_d^* \hat x_{real}\)</div>
+        <div class="formula">\(\tilde{z} = 1 - \tilde{\hat x},\; O\tilde z = \mathrm{Im}(\tilde z),\; T\tilde z = -2\tilde z(1-\tilde z)=\tilde p\)</div>
+        <div class="formula">H∞ 指标: \(\sup_w \frac{\|z\|_{L_2}}{\|w\|_{L_2}} \le \gamma\)</div>
+        <div class="formula">\(\kappa_O = \gamma_{O1}^{-2}+\gamma_{O2}^{-2},\;\kappa_T = \gamma_{T1}^{-2}+\gamma_{T2}^{-2}\)</div>
+        <div class="formula">控制律: \(\dot q = J^+\left[\kappa_O\,\mathrm{vec3}(O\tilde z)+\mathrm{vec6}(\tilde x\,\xi_d\,\tilde x^*)-\kappa_T\,\mathrm{vec3}(T\tilde z)\right]\)</div>
+        <div class="grid-2">
+          <label>\(\gamma_{O1}\)</label>
+          <input id="gamma-o1" type="number" step="0.1" min="0.1" value="2" />
+          <label>\(\gamma_{O2}\)</label>
+          <input id="gamma-o2" type="number" step="0.1" min="0.1" value="2" />
+          <label>\(\gamma_{T1}\)</label>
+          <input id="gamma-t1" type="number" step="0.1" min="0.1" value="2" />
+          <label>\(\gamma_{T2}\)</label>
+          <input id="gamma-t2" type="number" step="0.1" min="0.1" value="2" />
+        </div>
+        <div class="value">\(\kappa_O\): <span id="kappa-o"></span></div>
+        <div class="value">\(\kappa_T\): <span id="kappa-t"></span></div>
+        <div class="value">\(\dot q\): <span id="qdot"></span></div>
+      </section>
+    </aside>
+
+    <main id="viewer">
+      <canvas id="scene"></canvas>
+      <div class="overlay">
+        <div class="overlay-title">位姿快照</div>
+        <div class="overlay-row">\(\hat x_N\): <span id="overlay-xn"></span></div>
+        <div class="overlay-row">\(\hat x_{real}\): <span id="overlay-xreal"></span></div>
+      </div>
+    </main>
+  </div>
+
+  <script src="vendor/three.min.js"></script>
+  <script src="vendor/OrbitControls.js"></script>
+  <script>
+    (function () {
+      function showErr(msg) {
+        const box = document.createElement('div');
+        box.style.position = 'fixed';
+        box.style.left = '12px';
+        box.style.right = '12px';
+        box.style.bottom = '12px';
+        box.style.zIndex = '99999';
+        box.style.padding = '10px 12px';
+        box.style.borderRadius = '12px';
+        box.style.background = 'rgba(26, 16, 10, 0.85)';
+        box.style.border = '1px solid rgba(201, 104, 43, 0.6)';
+        box.style.color = '#fbd3b0';
+        box.style.fontSize = '12px';
+        box.style.whiteSpace = 'pre-wrap';
+        box.textContent = msg;
+        document.body.appendChild(box);
+      }
+      window.addEventListener('error', (e) => {
+        showErr(`脚本出错：${e.message || e.error || 'unknown'}\n建议：打开开发者工具(Console)查看具体报错行。`);
+      });
+      setTimeout(() => {
+        if (!window.THREE) {
+          showErr('Three.js 未加载成功（vendor/three.min.js）。');
+          return;
+        }
+        if (!window.THREE.OrbitControls) {
+          showErr('OrbitControls 未加载成功（vendor/OrbitControls.js）。');
+        }
+      }, 0);
+    })();
+  </script>
+  <script src="app.js"></script>
+</body>
+</html>
