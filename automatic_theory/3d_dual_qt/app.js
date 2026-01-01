@@ -19,6 +19,7 @@ const showRuntimeError = (message) => {
 
 const $ = (id) => document.getElementById(id);
 const EPS = 1e-8;
+const MAX_HISTORY = 12;
 
 const state = {
   links: [0.6, 0.5, 0.4],
@@ -49,6 +50,17 @@ const state = {
     o2: 2,
     t1: 2,
     t2: 2
+  },
+  iteration: {
+    dt: 0.05,
+    iteration: 0,
+    targetIndex: 0,
+    autoAdvance: true,
+    running: false,
+    timer: null,
+    history: [],
+    basePose: null,
+    runIntervalMs: 140
   },
   showAxes: true,
   showTraj: true,
@@ -181,6 +193,28 @@ function initUI() {
     const result = verifyJacobian();
     $('jac-verify-result').textContent = result;
   });
+
+  $('dt').addEventListener('input', (event) => {
+    state.iteration.dt = clampFloat(parseFloat(event.target.value) || 0.05, 0.001, 1);
+    updateAll();
+  });
+  $('target-index').addEventListener('input', (event) => {
+    state.iteration.targetIndex = Math.max(0, parseInt(event.target.value, 10) || 0);
+    updateAll();
+  });
+  $('target-auto').addEventListener('change', (event) => {
+    state.iteration.autoAdvance = event.target.checked;
+    updateAll();
+  });
+  $('step-once').addEventListener('click', () => {
+    stepIteration();
+  });
+  $('run-toggle').addEventListener('click', () => {
+    toggleRun();
+  });
+  $('reset-iter').addEventListener('click', () => {
+    resetIteration();
+  });
 }
 
 function initScene() {
@@ -274,7 +308,10 @@ function onResize() {
 }
 
 function updateAll() {
-  const computed = computeKinematics();
+  renderAll(computeKinematics());
+}
+
+function renderAll(computed) {
   updateUI(computed);
   updateScene(computed);
 }
@@ -333,10 +370,15 @@ function computeKinematics() {
   const xReal = dqMul(xN, error);
   const xDelta = dqMul(dqInverse(xN), xReal);
 
-  const target = getTargetDQ();
-  const trajectory = buildTrajectory(xN, target, error, state.trajectory);
+  const targetGoal = getTargetDQ();
+  const basePose = ensureIterationBase(xN);
+  const trajectory = buildTrajectory(basePose, targetGoal, error, state.trajectory);
+  const targetIndex = clampInt(state.iteration.targetIndex, 0, Math.max(0, trajectory.total - 1));
+  state.iteration.targetIndex = targetIndex;
+  trajectory.currentIndex = targetIndex;
+  const targetSample = trajectory.samples[targetIndex] || targetGoal;
   const jacobian = computeJacobian(positions, axesWorld, positions[positions.length - 1]);
-  const control = computeControl(jacobian.J, xReal, target, trajectory);
+  const control = computeControl(jacobian.J, xReal, targetSample, trajectory, state.iteration.dt);
 
   return {
     axesLocal,
@@ -347,7 +389,9 @@ function computeKinematics() {
     chain: { x1, x2, x3, x4, x12, x123, xN },
     xReal,
     xDelta,
-    target,
+    targetGoal,
+    targetSample,
+    basePose,
     trajectory,
     jacobian,
     control
@@ -378,8 +422,10 @@ function updateUI(data) {
   $('x-real').textContent = dqToString(data.xReal);
   $('x-delta').textContent = dqToString(data.xDelta);
 
-  $('x-d').textContent = dqToString(data.target);
-  $('x-d-t').textContent = fmtVec(dqToTranslation(data.target));
+  $('x-d').textContent = dqToString(data.targetSample);
+  $('x-d-t').textContent = fmtVec(dqToTranslation(data.targetSample));
+  $('x-goal').textContent = dqToString(data.targetGoal);
+  $('x-goal-t').textContent = fmtVec(dqToTranslation(data.targetGoal));
 
   $('jac-1').textContent = fmtVec6(data.jacobian.columns[0]);
   $('jac-2').textContent = fmtVec6(data.jacobian.columns[1]);
@@ -389,10 +435,29 @@ function updateUI(data) {
   $('kappa-o').textContent = data.control.kappaO.toFixed(3);
   $('kappa-t').textContent = data.control.kappaT.toFixed(3);
   $('qdot').textContent = fmtVec(data.control.qdot);
+  $('qprime').textContent = fmtVec(data.control.qprime);
 
   $('overlay-xn').textContent = dqToString(data.chain.xN);
   $('overlay-xreal').textContent = dqToString(data.xReal);
 
+  $('xn-state').textContent = dqToString(data.chain.xN);
+  $('xreal-state').textContent = dqToString(data.xReal);
+  $('xd-state').textContent = dqToString(data.targetSample);
+  $('xtilde-state').textContent = dqToString(data.control.xTilde);
+  $('ztilde-state').textContent = dqToString(data.control.zTilde);
+  $('oz-vec').textContent = fmtVec(data.control.oTilde);
+  $('tz-vec').textContent = fmtVec(data.control.tTilde);
+  $('oz-norm').textContent = data.control.norms.o.toFixed(4);
+  $('tz-norm').textContent = data.control.norms.t.toFixed(4);
+  $('gamma-value').textContent = data.control.gamma.toFixed(3);
+  $('term-o').textContent = fmtVec(data.control.termO);
+  $('term-xi').textContent = fmtVec6(data.control.xiTerm);
+  $('term-t').textContent = fmtVec(data.control.termT);
+  $('control-u').textContent = fmtVec6(data.control.u);
+
+  updateIterationUI(data);
+  updateJointInputs();
+  renderErrorHistory();
   updateTargetInputs();
 }
 
@@ -415,9 +480,9 @@ function updateScene(data) {
     axisHelpers[i].setLength(0.4);
   }
 
-  const targetTranslation = dqToTranslation(data.target);
+  const targetTranslation = dqToTranslation(data.targetSample);
   targetAxes.position.set(targetTranslation[0], targetTranslation[1], targetTranslation[2]);
-  const targetQuat = data.target.q;
+  const targetQuat = data.targetSample.q;
   targetAxes.quaternion.set(targetQuat[1], targetQuat[2], targetQuat[3], targetQuat[0]);
 
   nominalLine.visible = state.showTraj;
@@ -450,6 +515,169 @@ function buildLine(color) {
   const geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
   const material = new THREE.LineBasicMaterial({ color, linewidth: 2 });
   return new THREE.Line(geometry, material);
+}
+
+function stepIteration() {
+  const before = computeKinematics();
+  applyJointIncrement(before.control.qprime);
+  state.iteration.iteration += 1;
+  if (state.iteration.autoAdvance) {
+    advanceTargetIndex(before.trajectory.total);
+  }
+  const after = computeKinematics();
+  recordError(after.control);
+  renderAll(after);
+  pulseViewer();
+  if (state.iteration.running && shouldStopIteration(after.control)) {
+    stopRunLoop();
+    updateAll();
+  }
+}
+
+function toggleRun() {
+  if (state.iteration.running) {
+    stopRunLoop();
+  } else {
+    startRunLoop();
+  }
+  updateAll();
+}
+
+function startRunLoop() {
+  if (state.iteration.running) return;
+  state.iteration.running = true;
+  state.iteration.timer = setInterval(() => {
+    stepIteration();
+  }, state.iteration.runIntervalMs);
+}
+
+function stopRunLoop() {
+  state.iteration.running = false;
+  if (state.iteration.timer) {
+    clearInterval(state.iteration.timer);
+    state.iteration.timer = null;
+  }
+}
+
+function resetIteration() {
+  stopRunLoop();
+  const current = computeKinematics();
+  state.iteration.basePose = current.chain.xN;
+  state.iteration.iteration = 0;
+  state.iteration.targetIndex = 0;
+  state.iteration.history = [];
+  renderAll(computeKinematics());
+}
+
+function ensureIterationBase(xN) {
+  if (!state.iteration.basePose) {
+    state.iteration.basePose = xN;
+  }
+  return state.iteration.basePose;
+}
+
+function advanceTargetIndex(total) {
+  const maxIndex = Math.max(0, total - 1);
+  state.iteration.targetIndex = Math.min(state.iteration.targetIndex + 1, maxIndex);
+}
+
+function shouldStopIteration(control) {
+  return control.norms.o < 0.01 && control.norms.t < 0.01;
+}
+
+function recordError(control) {
+  if (!control || !control.norms) return;
+  state.iteration.history.unshift({
+    iter: state.iteration.iteration,
+    oNorm: control.norms.o,
+    tNorm: control.norms.t
+  });
+  if (state.iteration.history.length > MAX_HISTORY) {
+    state.iteration.history.pop();
+  }
+}
+
+function renderErrorHistory() {
+  const container = $('error-history');
+  if (!container) return;
+  container.innerHTML = '';
+  if (!state.iteration.history.length) {
+    const empty = document.createElement('div');
+    empty.className = 'value';
+    empty.textContent = '等待迭代数据…';
+    container.appendChild(empty);
+    return;
+  }
+  state.iteration.history.forEach((item) => {
+    const row = document.createElement('div');
+    row.className = 'error-row';
+    const iter = document.createElement('div');
+    iter.textContent = item.iter;
+    const o = document.createElement('div');
+    o.textContent = item.oNorm.toFixed(4);
+    const t = document.createElement('div');
+    t.textContent = item.tNorm.toFixed(4);
+    row.append(iter, o, t);
+    container.appendChild(row);
+  });
+}
+
+function updateIterationUI(data) {
+  $('dt').value = state.iteration.dt.toFixed(3);
+  $('iter-count').textContent = state.iteration.iteration;
+  const targetIndexInput = $('target-index');
+  targetIndexInput.value = state.iteration.targetIndex;
+  targetIndexInput.max = Math.max(0, data.trajectory.total - 1);
+  $('target-auto').checked = state.iteration.autoAdvance;
+  $('run-state').textContent = state.iteration.running ? '运行中' : '暂停';
+  const runButton = $('run-toggle');
+  runButton.textContent = state.iteration.running ? 'Pause' : 'Run';
+  runButton.classList.toggle('run-active', state.iteration.running);
+}
+
+function updateJointInputs() {
+  setInputPair('j1-angle', 'j1-angle-num', state.joints[0].angleDeg);
+  setInputPair('j2-angle', 'j2-angle-num', state.joints[1].angleDeg);
+  setInputPair('j3-angle', 'j3-angle-num', state.joints[2].angleDeg);
+  setInputPair('j4-d', 'j4-d-num', state.joints[3].displacement);
+}
+
+function setInputPair(rangeId, numberId, value) {
+  const range = $(rangeId);
+  const number = $(numberId);
+  if (range) range.value = value;
+  if (number) number.value = value;
+}
+
+function applyJointIncrement(qprime) {
+  state.joints.forEach((joint, idx) => {
+    const delta = qprime[idx] || 0;
+    if (joint.type === 'R') {
+      const range = $(`j${idx + 1}-angle`);
+      joint.angleDeg = clampToInput(joint.angleDeg + radToDeg(delta), range);
+    } else {
+      const range = $(`j${idx + 1}-d`);
+      joint.displacement = clampToInput(joint.displacement + delta, range);
+    }
+  });
+}
+
+function clampToInput(value, input) {
+  if (!input) return value;
+  const min = parseFloat(input.min);
+  const max = parseFloat(input.max);
+  let next = value;
+  if (!Number.isNaN(min)) next = Math.max(min, next);
+  if (!Number.isNaN(max)) next = Math.min(max, next);
+  return next;
+}
+
+function pulseViewer() {
+  const viewer = $('viewer');
+  if (!viewer) return;
+  viewer.classList.remove('pulse');
+  void viewer.offsetWidth;
+  viewer.classList.add('pulse');
 }
 
 function bindRangeNumber(rangeId, numberId, onChange) {
@@ -569,6 +797,7 @@ function getTargetDQ() {
 }
 
 function buildTrajectory(xStart, xEnd, error, options) {
+  const samples = [];
   const points = [];
   const errorPoints = [];
   const total = Math.max(10, options.points);
@@ -581,6 +810,7 @@ function buildTrajectory(xStart, xEnd, error, options) {
     } else {
       x = dqLerp(xStart, xEnd, t);
     }
+    samples.push(x);
     const pos = dqToTranslation(x);
     points.push(pos);
     const xErr = dqMul(x, error);
@@ -588,7 +818,7 @@ function buildTrajectory(xStart, xEnd, error, options) {
     errorPoints.push(posErr);
   }
 
-  return { points, errorPoints, total };
+  return { samples, points, errorPoints, total };
 }
 
 function slerpPose(a, b, t) {
@@ -641,7 +871,7 @@ function computeJacobian(positions, axesWorld, endPos) {
   return { J, columns };
 }
 
-function computeControl(J, xReal, xDesired, trajectory) {
+function computeControl(J, xReal, xDesired, trajectory, dt) {
   const xTilde = dqMul(dqInverse(xDesired), xReal);
   const one = { q: [1, 0, 0, 0], qt: [0, 0, 0, 0] };
   const zTilde = dqSub(one, xTilde);
@@ -650,27 +880,66 @@ function computeControl(J, xReal, xDesired, trajectory) {
   const tTilde = dqToTranslation(dqScale(tz, -2));
 
   const xiD = estimateDesiredTwist(trajectory);
+  const xiTerm = transformTwist(xTilde, xiD);
   const kappaO = powNeg2(state.gamma.o1) + powNeg2(state.gamma.o2);
   const kappaT = powNeg2(state.gamma.t1) + powNeg2(state.gamma.t2);
+  const gamma = Math.max(state.gamma.o1, state.gamma.o2, state.gamma.t1, state.gamma.t2);
 
-  const omega = addVec(scaleVec(oTilde, kappaO), xiD.slice(0, 3));
-  const v = addVec(scaleVec(tTilde, -kappaT), xiD.slice(3, 6));
+  const termO = scaleVec(oTilde, kappaO);
+  const termT = scaleVec(tTilde, -kappaT);
+  const omega = addVec(termO, xiTerm.slice(0, 3));
+  const v = addVec(termT, xiTerm.slice(3, 6));
   const u = [...omega, ...v];
 
   const Jplus = pseudoInverse(J);
   const qdot = matVecMul(Jplus, u);
+  const qprime = qdot.map((value) => value * dt);
 
-  return { kappaO, kappaT, qdot };
+  return {
+    kappaO,
+    kappaT,
+    gamma,
+    qdot,
+    qprime,
+    xTilde,
+    zTilde,
+    oTilde,
+    tTilde,
+    xiD,
+    xiTerm,
+    termO,
+    termT,
+    u,
+    norms: {
+      o: vecNorm(oTilde),
+      t: vecNorm(tTilde)
+    }
+  };
 }
 
 function estimateDesiredTwist(trajectory) {
-  if (trajectory.points.length < 2) {
+  if (!trajectory.samples || trajectory.samples.length < 2) {
     return [0, 0, 0, 0, 0, 0];
   }
-  const p0 = trajectory.points[0];
-  const p1 = trajectory.points[1];
-  const v = scaleVec(subVec(p1, p0), Math.max(1, trajectory.points.length - 1));
-  return [0, 0, 0, ...v];
+  const idx = clampInt(trajectory.currentIndex || 0, 0, trajectory.samples.length - 2);
+  const x0 = trajectory.samples[idx];
+  const x1 = trajectory.samples[idx + 1];
+  const p0 = dqToTranslation(x0);
+  const p1 = dqToTranslation(x1);
+  const scale = Math.max(1, trajectory.samples.length - 1);
+  const v = scaleVec(subVec(p1, p0), scale);
+  const delta = dqMul(x1, dqInverse(x0));
+  const axisAngle = quatToAxisAngle(delta.q);
+  const omega = scaleVec(axisAngle.axis, axisAngle.angle * scale);
+  return [...omega, ...v];
+}
+
+function transformTwist(x, xi) {
+  const omega = xi.slice(0, 3);
+  const v = xi.slice(3, 6);
+  const omegaR = quatRotateVec(x.q, omega);
+  const vR = addVec(quatRotateVec(x.q, v), crossVec(dqToTranslation(x), omegaR));
+  return [...omegaR, ...vR];
 }
 
 function verifyJacobian() {
@@ -712,6 +981,10 @@ function verifyJacobian() {
 }
 
 function clampInt(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function clampFloat(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
